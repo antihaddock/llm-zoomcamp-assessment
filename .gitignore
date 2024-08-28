@@ -1,0 +1,8 @@
+.ipynb_checkpoints/
+__pycache__/
+.venv
+.envrc
+.ipynb_checkpoints/
+__pycache__/
+ollama_files/
+**/.env
