@@ -3,7 +3,7 @@ Assignment for DataTalks Club LLM Zoomcamp
 
 
 Dataset used:
-https://github.com/Kent0n-Li/ChatDoctor/blob/main/chatdoctor5k.json
+https://raw.githubusercontent.com/Kent0n-Li/ChatDoctor/main/chatdoctor5k.json
 
 
 
