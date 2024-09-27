@@ -26,7 +26,7 @@ from psycopg2.extras import DictCursor
 from psycopg2.extensions import connection
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Optional, Dict, Any, List
+from typing import Optional, List, Dict, Any
 
 tz = ZoneInfo("Australia/Sydney")
 
@@ -74,7 +74,7 @@ def init_db() -> None:
                     id TEXT PRIMARY KEY,
                     question TEXT NOT NULL,
                     answer TEXT NOT NULL,
-                    course TEXT NOT NULL,
+    
                     model_used TEXT NOT NULL,
                     response_time FLOAT NOT NULL,
                     relevance TEXT NOT NULL,
@@ -106,7 +106,6 @@ def save_conversation(
     conversation_id: str, 
     question: str, 
     answer_data: Dict[str, Any], 
-    course: str, 
     timestamp: Optional[datetime] = None
 ) -> None:
     """
@@ -130,7 +129,6 @@ def save_conversation(
             - eval_completion_tokens (int): The number of tokens in the evaluation completion.
             - eval_total_tokens (int): The total number of tokens in the evaluation.
             - openai_cost (float): The cost associated with the OpenAI API call.
-        course (str): The course related to the conversation.
         timestamp (Optional[datetime]): The timestamp of the conversation. Defaults to current time.
 
     Returns:
@@ -146,7 +144,7 @@ def save_conversation(
             cur.execute(
                 """
                 INSERT INTO conversations 
-                (id, question, answer, course, model_used, response_time, relevance, 
+                (id, question, answer,  model_used, response_time, relevance, 
                 relevance_explanation, prompt_tokens, completion_tokens, total_tokens, 
                 eval_prompt_tokens, eval_completion_tokens, eval_total_tokens, openai_cost, timestamp)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
@@ -155,7 +153,6 @@ def save_conversation(
                     conversation_id,
                     question,
                     answer_data["answer"],
-                    course,
                     answer_data["model_used"],
                     answer_data["response_time"],
                     answer_data["relevance"],
@@ -205,6 +202,41 @@ def save_feedback(conversation_id: str, feedback: int, timestamp: Optional[datet
         conn.commit()
     finally:
         conn.close()
+
+def get_recent_conversations(limit: int = 5, relevance: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Fetches recent conversations from the database, optionally filtering by relevance.
+
+    This function retrieves a list of conversations from the database, with an optional relevance filter.
+    It joins the `conversations` table with the `feedback` table to include feedback data (if any), 
+    and orders the results by the timestamp in descending order.
+
+    Args:
+        limit (int): The maximum number of recent conversations to fetch. Defaults to 5.
+        relevance (Optional[str]): An optional filter to retrieve conversations based on their relevance. Defaults to None.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries, where each dictionary represents a conversation 
+        and its associated feedback.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            query = """
+                SELECT c.*, f.feedback
+                FROM conversations c
+                LEFT JOIN feedback f ON c.id = f.conversation_id
+            """
+            if relevance:
+                query += f" WHERE c.relevance = '{relevance}'"
+            query += " ORDER BY c.timestamp DESC LIMIT %s"
+
+            cur.execute(query, (limit,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
 
 
 def get_feedback_stats() -> Dict[str, int]:

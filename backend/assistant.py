@@ -41,25 +41,24 @@ load_dotenv()
 ELASTIC_URL = os.getenv("ELASTIC_URL", "http://elasticsearch:9200")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434/v1/")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL_NAME = os.getenv("MODEL_NAME")
+INDEX_NAME = os.getenv("INDEX_NAME")
 
 
 es_client = Elasticsearch(ELASTIC_URL)
 ollama_client = OpenAI(base_url=OLLAMA_URL, api_key="ollama")
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
+model = SentenceTransformer(MODEL_NAME)
 
 
-from typing import List, Dict, Any
-
-def elastic_search_text(query: str, course: str, index_name: str = "course-questions") -> List[Dict[str, Any]]:
+def elastic_search_text(query: str, index_name: str = INDEX_NAME) -> List[Dict[str, Any]]:
     """
-    Searches for text in the specified Elasticsearch index based on the query and course.
+    Searches for text in the specified Elasticsearch index based on the query.
 
     Args:
         query (str): The search query string.
-        course (str): The course filter for the search.
-        index_name (str): The name of the Elasticsearch index to search. Defaults to "course-questions".
+        index_name (str): The name of the Elasticsearch index to search. Defaults to the global INDEX_NAME.
 
     Returns:
         List[Dict[str, Any]]: A list of search results, where each result is a dictionary containing the source data.
@@ -68,20 +67,73 @@ def elastic_search_text(query: str, course: str, index_name: str = "course-quest
         "size": 5,
         "query": {
             "bool": {
-                "must": {
-                    "multi_match": {
-                        "query": query,
-                        "fields": ["question^3", "text", "section"],
-                        "type": "best_fields",
+                "should": [
+                    {
+                        "multi_match": {
+                            "query": query,
+                            "fields": ["question^3", "answer^2", "question_answer_vector"],
+                            "type": "best_fields",
+                        }
+                    },
+                    {
+                        "function_score": {
+                            "query": {
+                                "match": {
+                                    "question": query
+                                }
+                            },
+                            "functions": [
+                                {
+                                    "filter": {
+                                        "exists": {"field": "question_vector"}
+                                    },
+                                    "weight": 1.0
+                                }
+                            ],
+                            "boost_mode": "sum"
+                        }
                     }
-                },
-                "filter": {"term": {"course": course}},
+                ],
             }
         },
     }
 
     response = es_client.search(index=index_name, body=search_query)
     return [hit["_source"] for hit in response["hits"]["hits"]]
+
+def elastic_search_knn(field: str, vector: List[float], index_name: str = INDEX_NAME) -> List[Dict[str, Any]]:
+    """
+    Perform a k-nearest neighbor (k-NN) search in the specified Elasticsearch index based on a query vector.
+
+    This function searches for documents in the specified Elasticsearch index that are closest to the given query vector.
+    It returns a list of matching documents.
+
+    Args:
+        field (str): The field name in the index where the vector is stored.
+        vector (List[float]): The query vector for which to find the nearest neighbors.
+        index_name (str): The name of the Elasticsearch index to search. Defaults to the global INDEX_NAME.
+
+    Returns:
+        List[Dict[str, Any]]: A list of search results, where each result is a dictionary containing the source data.
+    """
+    knn_query = {
+        "field": field,
+        "query_vector": vector,
+        "k": 5,  # Number of nearest neighbors to retrieve
+        "num_candidates": 10000  # Number of candidates to consider for finding the nearest neighbors
+    }
+
+    search_query = {
+        "size": 5,  # Number of results to return
+        "query": {
+            "knn": knn_query
+        },
+        "_source": ["text", "section", "question", "id"]
+    }
+
+    es_results = es_client.search(index=index_name, body=search_query)
+
+    return [hit["_source"] for hit in es_results["hits"]["hits"]]
 
 
 
@@ -100,14 +152,15 @@ def build_prompt(query: str, search_results: List[Dict[str, str]]) -> str:
         str: A formatted prompt combining the question and context from the search results.
     """
     prompt_template = """
-You're a course teaching assistant. Answer the QUESTION based on the CONTEXT from the FAQ database.
-Use only the facts from the CONTEXT when answering the QUESTION.
+                        You're a doctor assistant chat bot. Answer the QUESTION based on the CONTEXT from the FAQ database.
+                        Use only the facts from the CONTEXT when answering the QUESTION. Do not make any answers up if you do not
+                        have enough context. If you do not know, state 'sorry I don't have an answer to that question'.
 
-QUESTION: {question}
+                        QUESTION: {question}
 
-CONTEXT: 
-{context}
-""".strip()
+                        CONTEXT: 
+                        {context}
+                      """.strip()
 
     context = "\n\n".join(
         [
@@ -245,7 +298,6 @@ def calculate_openai_cost(model_choice: str, tokens: Dict[str, int]) -> float:
 
 def get_answer(
     query: str, 
-    course: str, 
     model_choice: str, 
     search_type: str
 ) -> Dict[str, Any]:
@@ -258,9 +310,8 @@ def get_answer(
 
     Args:
         query (str): The query for which an answer is sought.
-        course (str): The course context to filter search results.
         model_choice (str): The identifier for the model used to generate the answer.
-        search_type (str): The type of search to perform ('Vector' or other).
+        search_type (str): The type of search to perform ('Vector' or 'Text').
 
     Returns:
         Dict[str, Any]: A dictionary containing:
@@ -279,9 +330,9 @@ def get_answer(
     """
     if search_type == 'Vector':
         vector = model.encode(query)
-        search_results = elastic_search_knn('question_text_vector', vector, course)
+        search_results = elastic_search_knn('question_vector', vector)
     else:
-        search_results = elastic_search_text(query, course)
+        search_results = elastic_search_text(query)
 
     prompt = build_prompt(query, search_results)
     answer, tokens, response_time = llm(prompt, model_choice)

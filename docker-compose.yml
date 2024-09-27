@@ -1,5 +1,5 @@
-
 services:
+  
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.4.3
     container_name: elasticsearch
@@ -17,30 +17,14 @@ services:
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
-  # ollama:
-  #   image: ollama/ollama
-  #   container_name: ollama
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   ports:
-  #     - "${OLLAMA_PORT:-11434}:11434"
   ollama:
     image: ollama/ollama
     container_name: ollama
-    # runtime: nvidia  # Specify the NVIDIA runtime for GPU support
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all  # Use all available GPUs
     volumes:
       - ollama_data:/root/.ollama
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all  # Allocate all available GPUs
-              capabilities: [gpu]
+
 
   postgres:
     image: postgres:13
@@ -54,28 +38,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  streamlit:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: streamlit
-    environment:
-      - ELASTIC_URL=http://elasticsearch:${ELASTIC_PORT:-9200}
-      - OLLAMA_URL=http://ollama:${OLLAMA_PORT:-11434}/v1/
-      - POSTGRES_HOST=postgres
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - MODEL_NAME=${MODEL_NAME}
-      - INDEX_NAME=${INDEX_NAME}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    ports:
-      - "${STREAMLIT_PORT:-8501}:8501"
-    depends_on:
-      - elasticsearch
-      - ollama
-      - postgres
-
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -87,6 +49,32 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
     depends_on:
       - postgres
+
+  backend:
+    build: ./backend
+    environment:
+      - ELASTIC_URL=http://elasticsearch:${ELASTIC_PORT:-9200}
+      - OLLAMA_URL=http://ollama:${OLLAMA_PORT:-11434}/v1/
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - MODEL_NAME=${MODEL_NAME}
+      - INDEX_NAME=${INDEX_NAME}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - elasticsearch
+      - ollama
+      - postgres
+  
+  frontend:
+    build: ./frontend
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
 
 volumes:
   elasticsearch_data:

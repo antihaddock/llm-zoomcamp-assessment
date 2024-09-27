@@ -36,6 +36,7 @@ from sentence_transformers import SentenceTransformer
 from elasticsearch import Elasticsearch
 from tqdm.auto import tqdm
 from dotenv import load_dotenv
+from typing import List, Dict
 
 from db import init_db
 
@@ -48,7 +49,7 @@ INDEX_NAME = os.getenv("INDEX_NAME")
 DOCS_URL = "https://raw.githubusercontent.com/Kent0n-Li/ChatDoctor/main/chatdoctor5k.json"
 
 
-def fetch_documents():
+def fetch_documents() -> List[Dict[str, str]]:
     """
     Fetches the documents from the specified URL.
 
@@ -66,12 +67,12 @@ def fetch_documents():
     return documents
 
 
-def load_model():
+def load_model() -> SentenceTransformer:
     print(f"Loading model: {MODEL_NAME}")
     return SentenceTransformer(MODEL_NAME)
 
 
-def setup_elasticsearch():
+def setup_elasticsearch() -> Elasticsearch:
     """
     Set up an Elasticsearch index for storing question-answer pairs along with vector representations of:
     1. The question alone (question_vector).
@@ -128,7 +129,7 @@ def setup_elasticsearch():
 
 
 
-def index_documents(es_client, documents, model):
+def index_documents(es_client: Elasticsearch, documents: List[Dict[str, str]], model: SentenceTransformer) -> None:
     """
     Index a list of documents into the Elasticsearch database.
 
@@ -147,8 +148,8 @@ def index_documents(es_client, documents, model):
     """
     print("Indexing documents...")
     for doc in tqdm(documents):
-        question = doc["question"]
-        answer = doc["answer"]
+        question = doc["input"]
+        answer = doc["output"]
 
         # Generate vector embeddings
         doc["question_vector"] = model.encode(question).tolist()  # Embedding for the question alone
@@ -160,7 +161,7 @@ def index_documents(es_client, documents, model):
     print(f"Indexed {len(documents)} documents")
 
 
-def main():
+def main() -> None:
     """
         Main function to coordinate the document indexing process.
 
