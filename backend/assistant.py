@@ -62,38 +62,18 @@ def elastic_search_text(query: str, index_name: str = INDEX_NAME) -> List[Dict[s
 
     Returns:
         List[Dict[str, Any]]: A list of search results, where each result is a dictionary containing the source data.
-    """
+    """   
     search_query = {
         "size": 5,
         "query": {
             "bool": {
-                "should": [
-                    {
-                        "multi_match": {
-                            "query": query,
-                            "fields": ["question^3", "answer^2", "question_answer_vector"],
-                            "type": "best_fields",
-                        }
-                    },
-                    {
-                        "function_score": {
-                            "query": {
-                                "match": {
-                                    "question": query
-                                }
-                            },
-                            "functions": [
-                                {
-                                    "filter": {
-                                        "exists": {"field": "question_vector"}
-                                    },
-                                    "weight": 1.0
-                                }
-                            ],
-                            "boost_mode": "sum"
-                        }
+                "must": {
+                    "multi_match": {
+                        "query": query,
+                        "fields": ["question^3", "answer"],
+                        "type": "best_fields",
                     }
-                ],
+                }
             }
         },
     }
@@ -104,9 +84,6 @@ def elastic_search_text(query: str, index_name: str = INDEX_NAME) -> List[Dict[s
 def elastic_search_knn(field: str, vector: List[float], index_name: str = INDEX_NAME) -> List[Dict[str, Any]]:
     """
     Perform a k-nearest neighbor (k-NN) search in the specified Elasticsearch index based on a query vector.
-
-    This function searches for documents in the specified Elasticsearch index that are closest to the given query vector.
-    It returns a list of matching documents.
 
     Args:
         field (str): The field name in the index where the vector is stored.
@@ -124,16 +101,15 @@ def elastic_search_knn(field: str, vector: List[float], index_name: str = INDEX_
     }
 
     search_query = {
-        "size": 5,  # Number of results to return
-        "query": {
-            "knn": knn_query
-        },
-        "_source": ["text", "section", "question", "id"]
+        "knn": knn_query,  # Move knn to top-level of the body
+        "_source": ["question", "answer", "id"],
+        "size": 5  # Number of results to return
     }
 
     es_results = es_client.search(index=index_name, body=search_query)
 
     return [hit["_source"] for hit in es_results["hits"]["hits"]]
+
 
 
 
@@ -146,7 +122,7 @@ def build_prompt(query: str, search_results: List[Dict[str, str]]) -> str:
     Args:
         query (str): The question to be answered by the teaching assistant.
         search_results (List[Dict[str, str]]): A list of search result documents, where each document is a dictionary
-                                              containing 'section', 'question', and 'text' keys.
+                                              containing 'id', 'question', and 'answer' keys.
 
     Returns:
         str: A formatted prompt combining the question and context from the search results.
@@ -164,7 +140,7 @@ def build_prompt(query: str, search_results: List[Dict[str, str]]) -> str:
 
     context = "\n\n".join(
         [
-            f"section: {doc['section']}\nquestion: {doc['question']}\nanswer: {doc['text']}"
+            f"id: {doc['id']}\nquestion: {doc['question']}\nanswer: {doc['answer']}"
             for doc in search_results
         ]
     )

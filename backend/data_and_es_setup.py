@@ -128,35 +128,39 @@ def setup_elasticsearch() -> Elasticsearch:
     return es_client
 
 
-
 def index_documents(es_client: Elasticsearch, documents: List[Dict[str, str]], model: SentenceTransformer) -> None:
     """
     Index a list of documents into the Elasticsearch database.
 
-    Each document should contain an 'id', 'question', and 'answer' field.
-    The function computes two vector embeddings for each document using the provided model:
-    1. One for the question alone.
-    2. One for the concatenation of question and answer.
+    Each document should contain an 'input' and 'output' field. The function renames 
+    'input' to 'question', 'output' to 'answer', and excludes the 'instruction' field 
+    from indexing. It also assigns an ascending number as the unique 'id' for each document.
 
     Args:
         es_client (Elasticsearch): The Elasticsearch client instance.
-        documents (list of dict): The list of documents to be indexed, each containing 'id', 'question', and 'answer'.
+        documents (list of dict): The list of documents to be indexed, each containing 'input' and 'output'.
         model (SentenceTransformer): The model to use for generating vector embeddings.
 
     Returns:
         None
     """
     print("Indexing documents...")
-    for doc in tqdm(documents):
+    for idx, doc in enumerate(tqdm(documents), start=1):
+        # Rename fields
         question = doc["input"]
         answer = doc["output"]
 
-        # Generate vector embeddings
-        doc["question_vector"] = model.encode(question).tolist()  # Embedding for the question alone
-        doc["question_answer_vector"] = model.encode(question + " " + answer).tolist()  # Embedding for both question and answer
+        # Prepare document for indexing
+        indexed_doc = {
+            "id": idx,  # Assign a unique ascending number as the document ID
+            "question": question,
+            "answer": answer,
+            "question_vector": model.encode(question).tolist(),  # Embedding for the question alone
+            "question_answer_vector": model.encode(question + " " + answer).tolist()  # Embedding for both question and answer
+        }
 
         # Index the document into Elasticsearch
-        es_client.index(index=INDEX_NAME, document=doc)
+        es_client.index(index=INDEX_NAME, document=indexed_doc, id=idx)  # Use the same id for indexing
 
     print(f"Indexed {len(documents)} documents")
 

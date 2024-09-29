@@ -1,72 +1,57 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Optional
-from db import save_conversation, save_feedback, get_recent_conversations, get_feedback_stats
-from assistant import get_answer
 import uvicorn
 
-# Initialize the FastAPI app
+# Import your assistant, database functions here
+from assistant import get_answer
+from db import save_conversation, save_feedback, get_recent_conversations, get_feedback_stats
+
 app = FastAPI()
 
-# Pydantic model for incoming requests
-class ConversationRequest(BaseModel):
-    conversation_id: str
-    question: str
+# Request models for FastAPI endpoints
+class QueryRequest(BaseModel):
+    user_input: str
+    model_choice: str
+    search_type: str
 
 class FeedbackRequest(BaseModel):
     conversation_id: str
     feedback: int
 
-# Endpoint to get an answer and save the conversation in the database
-@app.post("/conversation")
-async def conversation(request: ConversationRequest):
-    try:
-        # Call the assistant's get_answer function
-        answer_data = get_answer(request.question)
+# Endpoint for getting an answer
+@app.post("/get-answer")
+def get_answer_endpoint(query: QueryRequest):
+    answer_data = get_answer(query.user_input, query.model_choice, query.search_type)
+    return answer_data
+    # return {"message": "get answer endpoint"}
 
-        # Save the conversation to the database
-        save_conversation(
-            conversation_id=request.conversation_id,
-            question=request.question,
-            answer_data=answer_data
-        )
+# Endpoint for saving a conversation
+@app.post("/save-conversation")
+def save_conversation_endpoint(conversation_id: str, user_input: str, answer_data: dict):
+    save_conversation(conversation_id, user_input, answer_data)
+    return {"status": "success"}
 
-        return {
-            "status": "success",
-            "conversation_id": request.conversation_id,
-            "answer": answer_data["answer"]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Endpoint for saving feedback
+@app.post("/save-feedback")
+def save_feedback_endpoint(feedback_request: FeedbackRequest):
+    save_feedback(feedback_request.conversation_id, feedback_request.feedback)
+    return {"status": "success"}
 
-# Endpoint to save feedback for a conversation
-@app.post("/feedback")
-async def submit_feedback(request: FeedbackRequest):
-    try:
-        # Save the feedback in the database
-        save_feedback(conversation_id=request.conversation_id, feedback=request.feedback)
-        return {"status": "feedback saved"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Endpoint to get recent conversations
+@app.get("/recent-conversations")
+def recent_conversations(limit: int, relevance: str = None):
+    return get_recent_conversations(limit, relevance)
 
-# Endpoint to retrieve recent conversations (optionally filtered by relevance)
-@app.get("/get-recent-conversations")
-async def get_recent_conversations(limit: int = 5, relevance: Optional[str] = None):
-    try:
-        conversations = get_recent_conversations(limit=limit, relevance=relevance)
-        return conversations
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Endpoint to get feedback statistics
+# Endpoint to get feedback stats
 @app.get("/feedback-stats")
-async def feedback_stats():
-    try:
-        stats = get_feedback_stats()
-        return stats
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def feedback_stats():
+    return get_feedback_stats()
+
+# Optional: A root endpoint for basic health check or welcome
+@app.get("/")
+def read_root():
+    return {"message": "Course Assistant backend is running"}
 
 # Main entry point
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("backend:app", host="0.0.0.0", port=8000, reload=True)
