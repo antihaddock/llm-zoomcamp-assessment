@@ -102,5 +102,8 @@ The individual backend API endpoints can be seen in `backend/main.py` . All envi
 
 We implement the following best practices.
 
-Query rewriting
+### Hybrid Search
+Available as a search option in the streamlit UI and an option which can be passed to the get-answer API call in the backend UI. Options are Vector, text of hybrid
+
+### Query rewriting
 User query rewriting is done via the function `improve_query` in `./backend/chat_function.py` at line 274. Here we pass the original prompt to a LLM (defaults to OpenAI but can be connected to Ollama instead). This will check for spelling, grammar and clarity, adjusting the prompt as required.
