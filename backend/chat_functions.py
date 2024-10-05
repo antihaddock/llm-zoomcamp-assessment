@@ -30,7 +30,6 @@ import json
 from dotenv import load_dotenv
 
 from openai import OpenAI
-
 from elasticsearch import Elasticsearch
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Tuple, Any
@@ -111,6 +110,60 @@ def elastic_search_knn(field: str, vector: List[float], index_name: str = INDEX_
     return [hit["_source"] for hit in es_results["hits"]["hits"]]
 
 
+def elastic_search_hybrid(
+    field: str, 
+    query: str, 
+    vector: List[float], 
+    index_name: str = INDEX_NAME
+) -> List[Dict[str, Any]]:
+    """
+    Perform a hybrid search on Elasticsearch combining k-NN vector search and keyword matching.
+
+    Args:
+        field (str): The field to use for the k-NN search.
+        query (str): The keyword query string.
+        vector (List[float]): The query vector for k-NN search.
+        index_name (str): The Elasticsearch index to search. Defaults to the global INDEX_NAME.
+
+    Returns:
+        List[Dict[str, Any]]: A list of search result documents from Elasticsearch.
+    """
+    # k-NN query
+    knn_query = {
+        "field": field,
+        "query_vector": vector,
+        "k": 5,
+        "num_candidates": 10000,
+        "boost": 0.5
+    }
+
+    # Keyword search query
+    keyword_query = {
+        "bool": {
+            "must": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["question^3", "answer"],
+                    "type": "best_fields",
+                    "boost": 0.5,
+                }
+            }
+        }
+    }
+
+    # Hybrid search combining k-NN and keyword search
+    search_query = {
+        "knn": knn_query,
+        "query": keyword_query,
+        "size": 5,
+        "_source": ["question", "answer","id"]
+    }
+
+    es_results = es_client.search(index=index_name, body=search_query)
+
+    return [hit["_source"] for hit in es_results["hits"]["hits"]]
+
+
 
 
 def build_prompt(query: str, search_results: List[Dict[str, str]]) -> str:
@@ -173,6 +226,12 @@ def llm(prompt: str, model_choice: str) -> Tuple[str, Dict[str, int], float]:
             messages=[{"role": "user", "content": prompt}]
         )
     elif model_choice.startswith('openai/'):
+        response = openai_client.chat.completions.create(
+            model=model_choice.split('/')[-1],
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+    elif model_choice.startswith('aws_bedrock/'):
         response = openai_client.chat.completions.create(
             model=model_choice.split('/')[-1],
             messages=[{"role": "user", "content": prompt}]
@@ -271,6 +330,33 @@ def calculate_openai_cost(model_choice: str, tokens: Dict[str, int]) -> float:
 
     return openai_cost
 
+def improve_query(user_query: str, model: str = 'openai/gpt-4o-mini') -> str:
+    """
+    Enhances a user's query by correcting spelling, fixing grammar, and improving clarity, while maintaining the original 
+    context and similar length. Can use either OpenAI API or an Ollama server.
+
+    Args:
+        user_query (str): The original query from the user.
+        model (str): The name of the LLM model to use for processing the query (default is 'text-davinci-003' for OpenAI).
+        service (str): The service to use, either 'openai' or 'ollama' (default is 'openai').
+
+    Returns:
+        str: The improved query with better spelling, grammar, and clarity.
+    """
+
+    prompt = f"""
+    The following is a user's query: "{user_query}"
+
+    Please rewrite the query to improve clarity, fix any spelling or grammar mistakes, and maintain the same context.
+    Ensure the rewritten query is not much longer or shorter than the original query.
+
+    Rewritten query:
+    """
+    improved_query, _, _ = llm(prompt, model)
+    
+    return improved_query
+
+
 
 def get_answer(
     query: str, 
@@ -304,17 +390,27 @@ def get_answer(
             - 'eval_total_tokens' (int): Total number of tokens used in the evaluation.
             - 'openai_cost' (float): Cost of the API usage based on the model choice and token usage.
     """
+    # first clean the query to improve spelling and grammar and clarity
+    query = improve_query(query)
+    
+    # Search for the best matching knowledge base 
     if search_type == 'Vector':
         vector = model.encode(query)
         search_results = elastic_search_knn('question_vector', vector)
+    if search_type == 'Hybrid':
+        vector = model.encode(query)
+        search_results = elastic_search_hybrid('question_vector', query, vector)
     else:
         search_results = elastic_search_text(query)
 
+    #build a prompt pass context to the LLM and get an answer
     prompt = build_prompt(query, search_results)
     answer, tokens, response_time = llm(prompt, model_choice)
     
+    # Evaluate the relevance of the answer
     relevance, explanation, eval_tokens = evaluate_relevance(query, answer)
 
+    # Calculate cost
     openai_cost = calculate_openai_cost(model_choice, tokens)
  
     return {

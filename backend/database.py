@@ -71,7 +71,7 @@ def init_db() -> None:
 
             cur.execute("""
                 CREATE TABLE conversations (
-                    id TEXT PRIMARY KEY,
+                    id TEXT NOT NULL,
                     question TEXT NOT NULL,
                     answer TEXT NOT NULL,
     
@@ -135,19 +135,19 @@ def save_conversation(
         None
     """
     if timestamp is None:
-        timestamp = datetime.now(tz)
+        timestamp = datetime.now()  # Use the current timestamp if not provided
 
     conn: connection = get_db_connection()
-
+    
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO conversations 
-                (id, question, answer,  model_used, response_time, relevance, 
+                (id, question, answer, model_used, response_time, relevance, 
                 relevance_explanation, prompt_tokens, completion_tokens, total_tokens, 
                 eval_prompt_tokens, eval_completion_tokens, eval_total_tokens, openai_cost, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
                 """,
                 (
                     conversation_id,
@@ -170,6 +170,7 @@ def save_conversation(
         conn.commit()
     finally:
         conn.close()
+
 
 def save_feedback(conversation_id: str, feedback: int, timestamp: Optional[datetime] = None) -> None:
     """

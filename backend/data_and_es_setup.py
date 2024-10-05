@@ -38,7 +38,7 @@ from tqdm.auto import tqdm
 from dotenv import load_dotenv
 from typing import List, Dict
 
-from db import init_db
+from database import init_db
 
 load_dotenv()
 
